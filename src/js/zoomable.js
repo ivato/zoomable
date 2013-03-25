@@ -1,6 +1,6 @@
 (function( $ ){
 
-$.fn.zoomable = function( options ) {
+$.fn['zoomable'] = function( options ) {
 
 /*
 // Adding forEach if not present.
@@ -13,6 +13,27 @@ if (!('forEach' in Array.prototype)) {
 };
 */
 
+// http://www.jacklmoore.com/notes/naturalwidth-and-naturalheight-in-ie/
+var props = ['Width', 'Height'], prop;
+while (prop = props.pop()) {
+    (function (natural, prop) {
+        $.fn[natural] = (natural in new Image()) ? 
+        function () {
+          return this[0][natural];
+        } : 
+        function () {
+            var node = this[0], img, value;
+
+            if (node.tagName.toLowerCase() === 'img') {
+                img = new Image();
+                img.src = node.src,
+                value = img[prop];
+            }
+            return value;
+        };
+    }('natural' + prop, prop.toLowerCase()));
+};
+
 var that = $(this),
     smallImage = that.smallImage = that.find('img').first();
     // pixelRatio = !!window.devicePixelRatio ? window.devicePixelRatio : 1;
@@ -21,7 +42,7 @@ that.options = $.extend({
     'cssPrefix'         : 'zoomable-',
     'animated'          : true,
     'animDuration'      : 200,
-    'dblclickDelay'     : 150,
+    'unzoomClickDelay'  : 150,
     'maxThumbnailSize'  : 200,
     'fadeOnLoad'        : 0.5, // -1 to switch off
     'thumbnail'         : true
@@ -31,7 +52,6 @@ that.options.zoomInCursor && smallImage.css('cursor',that.options.zoomInCursor);
 
 /*
 // http://stackoverflow.com/questions/4817029/whats-the-best-way-to-detect-a-touch-screen-device-using-javascript
-
 // On capte les touch events et on les transforme en mouse events. http://ross.posterous.com/2008/08/19/iphone-touch-events-in-javascript/
 var touchHandler = function(event){
     var touches = event.changedTouches,
@@ -94,13 +114,14 @@ that['getSize'] = function(){
     return that.sizeBig ? {'width':that.sizeBig.w,'height':that.sizeBig.h } : {'width':0,'height':0};
 };
 
-that['unzoom'] = function(e){
+that['unzoom'] = function(onUnzoomDidEnd){
     if ( that.zoomed ){
         var onComplete = function(){
             that.zoomed = false;
             that.bigImage.unbind(mousedown).remove();
             that.options.thumbnail && that.thumbnail.unbind(mousemove).unbind(mouseup).unbind(mousedown).remove();
             that.smallImage.css('visibility','visible');
+            onUnzoomDidEnd && typeof(onUnzoomDidEnd) === 'function' && onUnzoomDidEnd(that);
             that.options.onUnzoomDidEnd && that.options.onUnzoomDidEnd(that);
         };
         that.thumbnail.css('visibility','hidden').empty();
@@ -120,7 +141,7 @@ that['unzoom'] = function(e){
     };
 };
 
-that['zoom'] = function(e){
+that['zoom'] = function(e,options){
 
     if ( that.zoomed ) return;
 
@@ -138,20 +159,22 @@ that['zoom'] = function(e){
 
     var mousePoint = e ? {x:e.offsetX||e.x||e.clientX,y:e.offsetY||e.x||e.clientY} : false,
         dragPoint = {x:0,y:0};
-        bigImageContent = that.bigImageContent = $('<img src="'+bigImageSrc+'"" >'),
+        bigImageContent = that.bigImageContent = $('<img src="'+bigImageSrc+'" >'),
         spinner = $('<div class="'+that.options.cssPrefix+'spinner" ></div>');
 
+    spinner.appendTo(that);
     that.bigImageContent.appendTo(bigImage);
-    // spinner.css({left:(cSize.w-spinner.width())/2,top:(cSize.h-spinner.height())/2}).appendTo(that);
-
     that.options.onZoomDidStart && that.options.onZoomDidStart(that);
 
     bigImageContent.load(function(e){
 
         spinner.remove();
+        options && options.onLoadComplete && options.onLoadComplete(that);
+        that.options.onLoadComplete && that.options.onLoadComplete(that);
+
         bigImage.css('visibility','visible');
         smallImage.css({'visibility':'hidden','opacity':1});
-        var sizeBig = that.sizeBig = {w:(e.srcElement||e.target).clientWidth,h:(e.srcElement||e.target).clientHeight};
+        var sizeBig = that.sizeBig = {w:bigImageContent.naturalWidth(),h:bigImageContent.naturalHeight()}; //{w:(e.srcElement||e.target).naturalWidth,h:(e.srcElement||e.target).naturalHeight};
         var r = sizeBig.w/sizeBig.h;
         var sizeInt = that.sizeInt = r>1 ? {w:cSize.w,h:sizeBig.h/sizeBig.w*cSize.w} : {w:sizeBig.w/sizeBig.h*cSize.h,h:cSize.h};
         if ( !mousePoint ) mousePoint = {x:cSize.w/2,y:cSize.h/2};
@@ -173,8 +196,9 @@ that['zoom'] = function(e){
                 var tWidth = parseFloat(thumbnail.css('max-width')) || 200,
                     //tHeight = parseFloat(thumbnail.css('max-height')) || 200;
                     thumbnailImage = $('<img src="'+bigImageSrc+'"" >');
+
                 thumbnailImage.appendTo(thumbnail);
-                var lens = $('<div class="'+that.options.cssPrefix+'lens"></div>');
+                var lens = $('<div class="'+that.options.cssPrefix+'zoomnav-lens" ></div>');
                 lens.appendTo(thumbnail);
 
                 tWidth = that.options.maxThumbnailSize;
@@ -252,7 +276,7 @@ that['zoom'] = function(e){
                 dragPoint = {x:e.screenX,y:e.screenY};
                 that.bind(mouseup,function(e) {
                     that.unbind(mousemove).unbind(mouseup);
-                    if ( new Date().getTime() - clickTime < that.options.dblclickDelay ){
+                    if ( new Date().getTime() - clickTime < that.options.unzoomClickDelay ){
                         that['unzoom']();
                     };
                     return false;
@@ -275,9 +299,11 @@ that['zoom'] = function(e){
                 });
                 return false;
             });
-        };
 
-        that.options.onZoomDidEnd && that.options.onZoomDidEnd(that);
+            options && options.onZoomDidEnd && options.onZoomDidEnd(that);
+            that.options.onZoomDidEnd && that.options.onZoomDidEnd(that);
+
+        };
 
         if ( that.options.animated ){
             bigImage.css({
